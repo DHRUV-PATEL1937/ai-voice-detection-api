@@ -1,77 +1,52 @@
 """
-Voice Detection Logic
-Loads model and performs inference
+Human Voice Authenticator - Detection Logic with Sigmoid Confidence
 """
 import torch
 import numpy as np
 from pathlib import Path
 import sys
 
-# Add paths
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from ml_models.model import HybridVoiceDetector
+from ml_models.human_voice_authenticator import HumanVoiceAuthenticator
 from ml_models.audio_processor import AudioProcessor
 from ml_models.feature_extractor import FeatureExtractor
 from config.settings import MODEL_PATH, NUM_ACOUSTIC_FEATURES
 
 class VoiceDetector:
-    """
-    Voice Detection Engine
-    Loads trained model and performs inference
-    """
+    """Authenticates human voices, detects anything else as AI"""
     
     def __init__(self, model_path=None):
-        """
-        Initialize detector with trained model
-        
-        Args:
-            model_path: Path to trained model checkpoint
-        """
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        print(f"🔧 Initializing detector on {self.device}")
+        print(f"🔧 Initializing human authenticator on {self.device}")
         
         if model_path is None:
             model_path = MODEL_PATH
         
-        # Initialize processors
         self.processor = AudioProcessor()
         self.extractor = FeatureExtractor()
         
-        # Load model
-        self.model = self._load_model(model_path)
-        self.model.eval()
+        # Load model and centroid
+        checkpoint = torch.load(model_path, map_location=self.device)
         
-        print(f"✅ Model loaded from {model_path}")
-    
-    def _load_model(self, model_path):
-        """Load trained model from checkpoint"""
-        
-        # Create model
-        model = HybridVoiceDetector(
+        self.model = HumanVoiceAuthenticator(
             num_acoustic_features=NUM_ACOUSTIC_FEATURES,
             dropout=0.3
         )
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.model = self.model.to(self.device)
+        self.model.eval()
         
-        # Load checkpoint
-        checkpoint = torch.load(model_path, map_location=self.device)
-        model.load_state_dict(checkpoint['model_state_dict'])
+        # Load human centroid and threshold
+        self.human_centroid = checkpoint['human_centroid'].to(self.device)
+        self.threshold = checkpoint.get('threshold', 0.5)
         
-        model = model.to(self.device)
-        
-        return model
+        print(f"✅ Model loaded from {model_path}")
+        print(f"✅ Detection threshold: {self.threshold:.4f}")
     
     def detect(self, base64_audio: str, language: str) -> dict:
-        """
-        Detect if audio is AI-generated or human
+        """Authenticate if voice is human with sigmoid-based confidence"""
         
-        Args:
-            base64_audio: Base64 encoded MP3 audio
-            language: Language of the audio
-            
-        Returns:
-            Dictionary with detection results
-        """
         try:
             # Process audio
             audio = self.processor.process_from_base64(base64_audio)
@@ -82,11 +57,9 @@ class VoiceDetector:
             # Prepare tensors
             mel_spec_tensor = torch.FloatTensor(mel_spec).unsqueeze(0).unsqueeze(0)
             
-            # Ensure consistent feature count
             sorted_keys = sorted(acoustic_features.keys())
             acoustic_values = [acoustic_features[key] for key in sorted_keys]
             
-            # Pad or trim to NUM_ACOUSTIC_FEATURES
             if len(acoustic_values) < NUM_ACOUSTIC_FEATURES:
                 acoustic_values += [0.0] * (NUM_ACOUSTIC_FEATURES - len(acoustic_values))
             elif len(acoustic_values) > NUM_ACOUSTIC_FEATURES:
@@ -98,20 +71,48 @@ class VoiceDetector:
             mel_spec_tensor = mel_spec_tensor.to(self.device)
             acoustic_tensor = acoustic_tensor.to(self.device)
             
-            # Inference
-            with torch.no_grad():
-                output = self.model(mel_spec_tensor, acoustic_tensor)
-                probabilities = torch.softmax(output, dim=1)
-                confidence, prediction = torch.max(probabilities, 1)
+            # ========================================
+            # ✅ SIGMOID-BASED CONFIDENCE CALCULATION
+            # ========================================
             
-            # Get results
-            classification = "AI_GENERATED" if prediction.item() == 0 else "HUMAN"
-            confidence_score = confidence.item()
+            with torch.no_grad():
+                # Get embedding
+                embedding = self.model(mel_spec_tensor, acoustic_tensor)
+                
+                # Compute distance from human centroid
+                distance = torch.norm(embedding - self.human_centroid, dim=1).item()
+                
+                # Decision threshold
+                is_human = distance < self.threshold
+                classification = "HUMAN" if is_human else "AI_GENERATED"
+                
+                # Sigmoid confidence calculation
+                # Creates a smooth S-curve centered at the threshold
+                steepness = 5.0 / self.threshold  # Controls transition sharpness
+                
+                # Sigmoid formula: 1 / (1 + e^(steepness * (distance - threshold)))
+                sigmoid_score = 1.0 / (1.0 + np.exp(steepness * (distance - self.threshold)))
+                
+                # Map sigmoid (0-1) to confidence percentage (60-100%)
+                if is_human:
+                    # For humans: sigmoid close to 1 means very confident
+                    confidence_percentage = 60 + (40 * sigmoid_score)
+                else:
+                    # For AI: sigmoid close to 0 means very confident it's AI
+                    confidence_percentage = 60 + (40 * (1 - sigmoid_score))
+                
+                # Ensure confidence is in valid range
+                confidence_percentage = max(60, min(100, confidence_percentage))
+            
+            # ========================================
+            # END OF SIGMOID CONFIDENCE
+            # ========================================
             
             # Generate explanation
             explanation = self._generate_explanation(
                 classification,
-                confidence_score,
+                distance,
+                self.threshold,
                 acoustic_features
             )
             
@@ -119,80 +120,70 @@ class VoiceDetector:
                 "status": "success",
                 "language": language,
                 "classification": classification,
-                "confidenceScore": round(confidence_score, 2),
+                "confidenceScore": round(float(confidence_percentage / 100), 4),  # ✅ Convert to 0-1
                 "explanation": explanation
             }
             
         except Exception as e:
             raise RuntimeError(f"Detection failed: {str(e)}")
     
-    def _generate_explanation(self, classification: str, confidence: float, features: dict) -> str:
-        """
-        Generate human-readable explanation for the classification
+    def _generate_explanation(self, classification, distance, threshold, features):
+        """Generate explanation based on distance from human centroid"""
         
-        Args:
-            classification: AI_GENERATED or HUMAN
-            confidence: Confidence score
-            features: Acoustic features dictionary
-            
-        Returns:
-            Explanation string
-        """
-        if classification == "AI_GENERATED":
+        if classification == "HUMAN":
             reasons = []
             
-            # Check pitch consistency
-            if features.get('pitch_std', 100) < 15:
-                reasons.append("unnaturally consistent pitch")
+            # Check human characteristics
+            if features.get('micro_jitter', 0) > 0.5:
+                reasons.append("natural pitch micro-variations")
             
-            # Check energy stability
-            if features.get('energy_std', 0.1) < 0.02:
-                reasons.append("overly stable energy levels")
+            if features.get('breath_count', 0) > 2:
+                reasons.append("authentic breathing patterns")
             
-            # Check pauses
-            if features.get('num_pauses', 10) < 2:
-                reasons.append("absence of natural speech pauses")
+            if features.get('spectral_roughness', 0) > 100:
+                reasons.append("natural vocal tract noise")
             
-            # Check spectral features
-            if features.get('spectral_centroid_std', 1000) < 200:
-                reasons.append("monotonous spectral patterns")
+            if features.get('timing_irregularity', 0) > 0.1:
+                reasons.append("human timing irregularities")
+            
+            # Add distance-based confidence indicator
+            if distance < threshold * 0.5:
+                confidence_desc = "Strong human voice signature detected"
+            elif distance < threshold * 0.75:
+                confidence_desc = "Clear human vocal characteristics"
+            else:
+                confidence_desc = "Human voice authenticated"
             
             if reasons:
-                return f"Detected {', '.join(reasons)} characteristic of synthetic speech"
+                return f"{confidence_desc} with {', '.join(reasons[:3])}"
             else:
-                return "Audio exhibits spectral and prosodic patterns consistent with AI voice synthesis"
+                return f"{confidence_desc} (authenticity distance: {distance:.3f})"
         
-        else:  # HUMAN
+        else:  # AI_GENERATED
             reasons = []
             
-            # Check for human characteristics
-            if features.get('pitch_std', 0) > 25:
-                reasons.append("natural pitch variation")
+            # Check why it's not human
+            if features.get('micro_jitter', 0) < 0.3:
+                reasons.append("unnaturally stable pitch")
             
-            if features.get('num_pauses', 0) > 3:
-                reasons.append("organic speech pauses")
+            if features.get('breath_count', 0) == 0:
+                reasons.append("absence of breathing sounds")
             
-            if features.get('energy_sudden_changes', 0) > 8:
-                reasons.append("natural energy fluctuations")
+            if features.get('spectral_roughness', 0) < 50:
+                reasons.append("overly clean spectral characteristics")
             
-            if features.get('spectral_bandwidth_std', 0) > 300:
-                reasons.append("variable spectral characteristics")
+            if features.get('hnr', float('inf')) > 20:
+                reasons.append("too-perfect harmonic structure")
+            
+            # Add distance-based confidence indicator
+            if distance > threshold * 1.5:
+                confidence_desc = "Strong AI signature detected"
+            elif distance > threshold * 1.2:
+                confidence_desc = "Clear AI-generated characteristics"
+            else:
+                confidence_desc = "Failed human authentication"
             
             if reasons:
-                return f"Detected {', '.join(reasons)} indicating authentic human speech"
+                return f"{confidence_desc}: {', '.join(reasons[:3])}"
             else:
-                return "Audio characteristics align with natural human voice production patterns"
-
-
-# Test the detector
-if __name__ == "__main__":
-    print("🧪 Testing Voice Detector...")
-    
-    try:
-        detector = VoiceDetector()
-        print("✅ Detector initialized successfully!")
-        
-    except Exception as e:
-        print(f"❌ Error: {e}")
-        import traceback
-        traceback.print_exc()
+                return f"{confidence_desc} (deviation from human pattern: {distance:.3f})"

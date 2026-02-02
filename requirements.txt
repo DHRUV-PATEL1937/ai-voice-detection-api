@@ -27,3 +27,7 @@ tqdm==4.66.1
 # Development
 pytest==7.4.3
 httpx==0.25.2
+
+# Deployment
+gunicorn==21.2.0
+gdown==4.7.1

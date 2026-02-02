@@ -1,8 +1,0 @@
-{
-  "experiment_name": "voice_detector_20260131_190736",
-  "batch_size": 16,
-  "epochs": 30,
-  "learning_rate": 0.001,
-  "weight_decay": 1e-05,
-  "dropout": 0.3
-}

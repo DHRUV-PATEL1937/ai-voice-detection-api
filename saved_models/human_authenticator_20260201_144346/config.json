@@ -1,0 +1,7 @@
+{
+  "experiment_name": "human_authenticator_20260201_144346",
+  "batch_size": 16,
+  "epochs": 30,
+  "learning_rate": 0.001,
+  "dropout": 0.3
+}
