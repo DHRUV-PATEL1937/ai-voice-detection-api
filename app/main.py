@@ -4,7 +4,7 @@ FastAPI Application - AI Voice Detection API
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 import logging
 from pathlib import Path
@@ -26,7 +26,7 @@ app = FastAPI(
 # CRITICAL: Add CORS middleware to allow frontend to connect
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins (change in production)
+    allow_origins=["*"],  # Allow all origins
     allow_credentials=True,
     allow_methods=["*"],  # Allow all methods
     allow_headers=["*"],  # Allow all headers
@@ -88,6 +88,41 @@ async def health_check():
         "detector_ready": detector is not None
     }
 
+@app.get("/test")
+async def test_page():
+    """Simple test page to verify Render is working"""
+    html_content = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Render Test</title>
+    </head>
+    <body>
+        <h1>✅ Render is serving pages!</h1>
+        <p>API URL: <span id="url"></span></p>
+        <button onclick="testAPI()">Test API</button>
+        <div id="result"></div>
+        
+        <script>
+            document.getElementById('url').textContent = window.location.origin;
+            
+            async function testAPI() {
+                try {
+                    const response = await fetch('/health');
+                    const data = await response.json();
+                    document.getElementById('result').innerHTML = 
+                        '<p style="color: green;">✅ API is working! ' + JSON.stringify(data) + '</p>';
+                } catch (error) {
+                    document.getElementById('result').innerHTML = 
+                        '<p style="color: red;">❌ API error: ' + error.message + '</p>';
+                }
+            }
+        </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
+
 @app.post("/api/voice-detection", response_model=VoiceDetectionResponse)
 async def detect_voice(request: VoiceDetectionRequest):
     """Detect if voice is AI-generated or human"""
@@ -119,14 +154,32 @@ async def detect_voice(request: VoiceDetectionRequest):
             detail=f"Detection failed: {str(e)}"
         )
 
-# Mount static files for CSS, JS, etc.
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
-# Root route - serve index.html (MUST be after /api routes)
+# Root route - serve index.html
 @app.get("/")
 async def root():
     """Serve the frontend"""
-    return FileResponse("static/index.html")
+    index_path = Path("static/index.html")
+    
+    if not index_path.exists():
+        logger.error(f"❌ index.html not found at: {index_path.absolute()}")
+        return HTMLResponse(
+            content="""
+            <h1>❌ Error: index.html not found</h1>
+            <p>Expected location: static/index.html</p>
+            <p><a href="/test">Go to test page</a></p>
+            """,
+            status_code=500
+        )
+    
+    logger.info(f"📄 Serving index.html from: {index_path.absolute()}")
+    return FileResponse(index_path)
+
+# Serve static files (CSS, JS, etc.)
+try:
+    app.mount("/static", StaticFiles(directory="static"), name="static")
+    logger.info("✅ Static files mounted at /static/")
+except Exception as e:
+    logger.error(f"❌ Failed to mount static files: {e}")
 
 if __name__ == "__main__":
     import uvicorn
