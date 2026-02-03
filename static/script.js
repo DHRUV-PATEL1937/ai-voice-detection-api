@@ -1,8 +1,6 @@
 // Configuration
-const API_URL = window.location.hostname === 'localhost' 
-    ? 'http://localhost:8000/api/voice-detection'
-    : `${window.location.origin}/api/voice-detection`;
-
+// Auto-detect environment
+const API_URL = window.location.origin;
 
 // Global variables
 let selectedFile = null;
@@ -60,7 +58,7 @@ async function analyzeAudio() {
         const language = document.getElementById('language').value;
         
         // Make API request
-        const response = await fetch(API_URL, {
+        const response = await fetch(`${API_URL}/api/voice-detection`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
