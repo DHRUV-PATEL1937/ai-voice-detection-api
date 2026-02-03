@@ -42,6 +42,15 @@ static_path = Path(__file__).parent.parent / "static"
 if static_path.exists():
     app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
 
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for monitoring services"""
+    return {
+        "status": "healthy",
+        "message": "AI Voice Detection API is running",
+        "timestamp": "2026-02-03"
+    }
+
 @app.get("/")
 async def root():
     """Serve the main page"""
