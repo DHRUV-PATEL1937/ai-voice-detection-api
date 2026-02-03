@@ -80,11 +80,6 @@ async def startup_event():
     print("✅ API Ready!")
     print("="*60 + "\n")
 
-@app.get("/")
-async def root():
-    """Serve the frontend"""
-    return FileResponse("static/index.html")
-
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
@@ -124,8 +119,14 @@ async def detect_voice(request: VoiceDetectionRequest):
             detail=f"Detection failed: {str(e)}"
         )
 
-# Mount static files AFTER defining routes
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
+# Mount static files for CSS, JS, etc.
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Root route - serve index.html (MUST be after /api routes)
+@app.get("/")
+async def root():
+    """Serve the frontend"""
+    return FileResponse("static/index.html")
 
 if __name__ == "__main__":
     import uvicorn
