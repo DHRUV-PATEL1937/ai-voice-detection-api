@@ -15,30 +15,46 @@ from ml_models.feature_extractor import FeatureExtractor
 class VoiceDetector:
     """Authenticates human voices, detects anything else as AI"""
     
-    def __init__(self):
+    def __init__(self, model_path=None):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         print(f"🔧 Initializing human authenticator on {self.device}")
         
-        # Try to find model in multiple locations
-        possible_model_paths = [
-            Path('saved_models/best_model.pth'),
-            Path('best_model.pth'),
-            Path('/opt/render/project/src/saved_models/best_model.pth'),
-            Path('/opt/render/project/src/best_model.pth'),
-        ]
-        
-        model_path = None
-        for path in possible_model_paths:
-            if path.exists():
-                model_path = path
-                print(f"✅ Found model at: {model_path}")
-                break
-        
+        # If no path provided, search for model
         if model_path is None:
-            raise FileNotFoundError(
-                f"Model file not found! Searched:\n" + 
-                "\n".join([f"  - {p}" for p in possible_model_paths])
-            )
+            possible_paths = [
+                # First check the standard location
+                Path('saved_models/best_model.pth'),
+                
+                # Then check human_authenticator folders (most recent first)
+                *sorted(
+                    Path('saved_models').glob('human_authenticator_*/best_model.pth'),
+                    key=lambda p: p.stat().st_mtime,
+                    reverse=True
+                ),
+                
+                # Deployment locations
+                Path('best_model.pth'),
+                Path('/opt/render/project/src/saved_models/best_model.pth'),
+                Path('/opt/render/project/src/best_model.pth'),
+            ]
+            
+            model_path = None
+            for path in possible_paths:
+                if path.exists():
+                    model_path = path
+                    print(f"✅ Found model at: {model_path}")
+                    break
+            
+            if model_path is None:
+                raise FileNotFoundError(
+                    "Model file not found! Please ensure best_model.pth exists in saved_models/"
+                )
+        else:
+            model_path = Path(model_path)
+            if not model_path.exists():
+                raise FileNotFoundError(f"Model not found at: {model_path}")
+        
+        print(f"📂 Loading model from: {model_path}")
         
         self.processor = AudioProcessor()
         self.extractor = FeatureExtractor()
@@ -48,11 +64,16 @@ class VoiceDetector:
             checkpoint = torch.load(model_path, map_location=self.device)
             print(f"✅ Checkpoint loaded")
         except Exception as e:
+            print(f"❌ Failed to load checkpoint: {e}")
             raise RuntimeError(f"Failed to load checkpoint: {e}")
         
         # Get number of features from checkpoint
-        num_features = checkpoint['config']['num_acoustic_features']
-        print(f"✅ Model expects {num_features} acoustic features")
+        try:
+            num_features = checkpoint['config']['num_acoustic_features']
+            print(f"✅ Model expects {num_features} acoustic features")
+        except KeyError:
+            print(f"⚠️  'num_acoustic_features' not in checkpoint config")
+            raise
         
         # Create model
         try:
@@ -65,14 +86,20 @@ class VoiceDetector:
             self.model.eval()
             print(f"✅ Model initialized")
         except Exception as e:
+            print(f"❌ Failed to initialize model: {e}")
             raise RuntimeError(f"Failed to initialize model: {e}")
         
         # Load human centroid and threshold
-        self.human_centroid = checkpoint['human_centroid'].to(self.device)
-        self.threshold = checkpoint.get('threshold', 0.5)
+        try:
+            self.human_centroid = checkpoint['human_centroid'].to(self.device)
+            self.threshold = checkpoint.get('threshold', 0.5)
+            print(f"✅ Human centroid loaded")
+            print(f"✅ Detection threshold: {self.threshold:.4f}")
+        except Exception as e:
+            print(f"❌ Failed to load centroid: {e}")
+            raise
         
-        print(f"✅ Model loaded successfully")
-        print(f"✅ Detection threshold: {self.threshold:.4f}")
+        print(f"✅ Detector ready!")
     
     def detect(self, base64_audio: str, language: str) -> dict:
         """Authenticate if voice is human"""
@@ -110,27 +137,43 @@ class VoiceDetector:
                 # Compute distance from human centroid
                 distance = torch.norm(embedding - self.human_centroid, dim=1).item()
                 
-                # Compute confidence
-                authenticity_score = np.exp(-distance)
-                
                 # Decision
                 is_human = distance < self.threshold
                 classification = "HUMAN" if is_human else "AI_GENERATED"
-                confidence = authenticity_score if is_human else (1 - authenticity_score)
+                
+                # IMPROVED CONFIDENCE CALCULATION
+                # Calculate how far we are from the threshold
+                if is_human:
+                    # For human: closer to 0 = more confident
+                    # Map distance [0, threshold] to confidence [100%, 65%]
+                    normalized_distance = min(distance / self.threshold, 1.0)
+                    confidence = 100 - (normalized_distance * 35)  # 100% to 65%
+                else:
+                    # For AI: farther from threshold = more confident
+                    # Map distance [threshold, 2*threshold] to confidence [65%, 100%]
+                    excess_distance = distance - self.threshold
+                    normalized_excess = min(excess_distance / self.threshold, 1.0)
+                    confidence = 65 + (normalized_excess * 35)  # 65% to 100%
+                
+                # Ensure confidence is in valid range
+                confidence = max(60, min(confidence, 100))
+                
+                print(f"📊 Distance: {distance:.4f}, Threshold: {self.threshold:.4f}, Confidence: {confidence:.1f}%")
             
             # Generate explanation
             explanation = self._generate_explanation(
                 classification,
                 distance,
                 self.threshold,
-                acoustic_features
+                acoustic_features,
+                confidence
             )
             
             return {
                 "status": "success",
                 "language": language,
                 "classification": classification,
-                "confidenceScore": round(float(confidence), 2),
+                "confidenceScore": round(float(confidence) / 100, 2),  # Return as 0.0-1.0
                 "explanation": explanation
             }
             
@@ -139,45 +182,68 @@ class VoiceDetector:
             traceback.print_exc()
             raise RuntimeError(f"Detection failed: {str(e)}")
     
-    def _generate_explanation(self, classification, distance, threshold, features):
-        """Generate explanation based on distance from human centroid"""
+    def _generate_explanation(self, classification, distance, threshold, features, confidence):
+        """Generate human-friendly explanation"""
         
         if classification == "HUMAN":
-            reasons = []
+            # Identify strong human characteristics
+            human_traits = []
             
             if features.get('micro_jitter', 0) > 0.5:
-                reasons.append("natural pitch micro-variations")
+                human_traits.append("natural pitch variations")
             
             if features.get('breath_count', 0) > 2:
-                reasons.append("authentic breathing patterns")
+                human_traits.append("authentic breathing patterns")
+            elif features.get('breath_count', 0) > 0:
+                human_traits.append("breathing sounds")
             
             if features.get('spectral_roughness', 0) > 100:
-                reasons.append("natural vocal tract noise")
+                human_traits.append("natural vocal texture")
             
             if features.get('timing_irregularity', 0) > 0.1:
-                reasons.append("human timing irregularities")
+                human_traits.append("human timing patterns")
             
-            if reasons:
-                return f"Voice authenticated with {', '.join(reasons)} characteristic of human speech"
+            if features.get('formant_variability', 0) > 0.05:
+                human_traits.append("natural voice modulation")
+            
+            # Generate explanation based on traits found
+            if len(human_traits) >= 3:
+                traits_text = ", ".join(human_traits[:3])
+                return f"Voice authenticated with {traits_text} characteristic of human speech"
+            elif len(human_traits) >= 1:
+                traits_text = " and ".join(human_traits)
+                return f"Voice shows {traits_text} typical of human speakers"
             else:
-                return f"Voice matches human vocal characteristics (distance: {distance:.3f})"
+                return "Voice matches the acoustic profile of authentic human speech"
         
         else:
-            reasons = []
+            # AI Generated - Focus on what's missing or unnatural
+            ai_indicators = []
             
             if features.get('micro_jitter', 0) < 0.3:
-                reasons.append("unnaturally stable pitch")
+                ai_indicators.append("unnaturally stable pitch patterns")
             
             if features.get('breath_count', 0) == 0:
-                reasons.append("absence of breathing sounds")
+                ai_indicators.append("absence of breathing sounds")
             
             if features.get('spectral_roughness', 0) < 50:
-                reasons.append("overly clean spectral characteristics")
+                ai_indicators.append("overly smooth vocal quality")
             
             if features.get('hnr', float('inf')) > 20:
-                reasons.append("too-perfect harmonic structure")
+                ai_indicators.append("artificially perfect harmonics")
             
-            if reasons:
-                return f"Failed human authentication due to {', '.join(reasons)}"
+            if features.get('timing_irregularity', 0) < 0.05:
+                ai_indicators.append("mechanically precise timing")
+            
+            if features.get('shimmer', 0) < 0.02:
+                ai_indicators.append("suspiciously consistent amplitude")
+            
+            # Generate explanation based on AI indicators
+            if len(ai_indicators) >= 3:
+                traits_text = ", ".join(ai_indicators[:3])
+                return f"Voice exhibits {traits_text}, indicating AI synthesis"
+            elif len(ai_indicators) >= 1:
+                traits_text = " and ".join(ai_indicators[:2])
+                return f"Detection based on {traits_text} not typical of human speech"
             else:
-                return f"Voice does not match human vocal patterns (distance: {distance:.3f} > threshold: {threshold:.3f})"
+                return "Voice lacks the natural imperfections and variability characteristic of human speakers"

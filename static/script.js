@@ -95,10 +95,22 @@ function displayResults(result) {
     document.getElementById('resultTitle').textContent = isAI ? 'AI Generated Voice' : 'Human Voice';
     document.getElementById('resultTitle').style.color = isAI ? '#dc3545' : '#28a745';
     
-    // Set confidence
+    // Set confidence - FIXED: Ensure percentage is displayed
     const confidence = Math.round(result.confidenceScore * 100);
+    console.log('Confidence score:', result.confidenceScore, 'Percentage:', confidence); // Debug log
+    
     document.getElementById('confidenceScore').textContent = `${confidence}%`;
     document.getElementById('confidenceFill').style.width = `${confidence}%`;
+    
+    // Add color to confidence bar based on value
+    const confidenceFill = document.getElementById('confidenceFill');
+    if (confidence >= 80) {
+        confidenceFill.style.backgroundColor = '#28a745'; // Green
+    } else if (confidence >= 60) {
+        confidenceFill.style.backgroundColor = '#ffc107'; // Yellow
+    } else {
+        confidenceFill.style.backgroundColor = '#dc3545'; // Red
+    }
     
     // Set details
     document.getElementById('resultLanguage').textContent = result.language;
