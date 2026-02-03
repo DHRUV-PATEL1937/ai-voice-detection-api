@@ -10,15 +10,16 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+# Download model on startup (for deployment)
 import os
-if os.getenv('RAILWAY_ENVIRONMENT') or os.getenv('RENDER'):
-    print("🚀 Running on server - downloading model...")
+if os.getenv('RENDER'):
+    print("🚀 Running on Render - downloading model...")
     try:
         from scripts.download_model import download_and_extract_model
         download_and_extract_model()
     except Exception as e:
-        print(f"⚠️  Model download skipped: {e}")
-        
+        print(f"⚠️  Model download: {e}")
+
 from app.detector import VoiceDetector
 from app.schemas import DetectionRequest, DetectionResponse
 
@@ -42,15 +43,6 @@ static_path = Path(__file__).parent.parent / "static"
 if static_path.exists():
     app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
 
-@app.get("/health")
-async def health_check():
-    """Health check endpoint for monitoring services"""
-    return {
-        "status": "healthy",
-        "message": "AI Voice Detection API is running",
-        "timestamp": "2026-02-03"
-    }
-
 @app.get("/")
 async def root():
     """Serve the main page"""
@@ -58,6 +50,14 @@ async def root():
     if index_file.exists():
         return FileResponse(str(index_file))
     return {"status": "healthy", "message": "AI Voice Detection API is running"}
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "message": "AI Voice Detection API is running"
+    }
 
 @app.post("/api/voice-detection", response_model=DetectionResponse)
 async def detect_voice(request: DetectionRequest):
