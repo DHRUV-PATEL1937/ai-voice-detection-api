@@ -10,6 +10,15 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import os
+if os.getenv('RAILWAY_ENVIRONMENT') or os.getenv('RENDER'):
+    print("🚀 Running on server - downloading model...")
+    try:
+        from scripts.download_model import download_and_extract_model
+        download_and_extract_model()
+    except Exception as e:
+        print(f"⚠️  Model download skipped: {e}")
+        
 from app.detector import VoiceDetector
 from app.schemas import DetectionRequest, DetectionResponse
 

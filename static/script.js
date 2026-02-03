@@ -1,5 +1,8 @@
 // Configuration
-const API_URL = 'http://localhost:8000/api/voice-detection';
+const API_URL = window.location.hostname === 'localhost' 
+    ? 'http://localhost:8000/api/voice-detection'
+    : `${window.location.origin}/api/voice-detection`;
+
 
 // Global variables
 let selectedFile = null;
