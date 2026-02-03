@@ -78,20 +78,30 @@ class VoiceDetector:
                 # Compute distance from human centroid
                 distance = torch.norm(embedding - self.human_centroid, dim=1).item()
                 
+                # ✅ FIXED CONFIDENCE CALCULATION
                 # Decision
                 is_human = distance < self.threshold
-                classification = "HUMAN" if is_human else "AI_GENERATED"
-                
-                # Sigmoid confidence calculation
-                steepness = 5.0 / self.threshold
-                sigmoid_score = 1.0 / (1.0 + np.exp(steepness * (distance - self.threshold)))
                 
                 if is_human:
-                    confidence_percentage = 60 + (40 * sigmoid_score)
+                    # HUMAN: Map distance to confidence
+                    # Distance 0 → 100% confidence
+                    # Distance at threshold → 60% confidence
+                    normalized_distance = distance / self.threshold
+                    confidence = 1.0 - (0.4 * normalized_distance)  # Range: 0.6 to 1.0
+                    classification = "HUMAN"
                 else:
-                    confidence_percentage = 60 + (40 * (1 - sigmoid_score))
+                    # AI: Map distance beyond threshold to confidence
+                    # Just above threshold → 60% confidence
+                    # Far from threshold → 100% confidence
+                    excess_distance = distance - self.threshold
+                    max_excess = self.threshold * 2  # Define maximum expected distance
+                    
+                    normalized_excess = min(excess_distance / max_excess, 1.0)
+                    confidence = 0.6 + (0.4 * normalized_excess)  # Range: 0.6 to 1.0
+                    classification = "AI_GENERATED"
                 
-                confidence_percentage = max(60, min(100, confidence_percentage))
+                # Convert to percentage
+                confidence_percentage = confidence * 100
             
             # Generate explanation
             explanation = self._generate_explanation(
@@ -105,19 +115,20 @@ class VoiceDetector:
                 "status": "success",
                 "language": language,
                 "classification": classification,
-                "confidenceScore": round(float(confidence_percentage / 100), 4),
+                "confidenceScore": round(float(confidence_percentage), 2),  # Now in 60-100 range
                 "explanation": explanation
             }
             
         except Exception as e:
             raise RuntimeError(f"Detection failed: {str(e)}")
-    
+            
     def _generate_explanation(self, classification, distance, threshold, features):
         """Generate explanation based on distance from human centroid"""
         
         if classification == "HUMAN":
             reasons = []
             
+            # Check human characteristics
             if features.get('micro_jitter', 0) > 0.5:
                 reasons.append("natural pitch micro-variations")
             
@@ -130,21 +141,15 @@ class VoiceDetector:
             if features.get('timing_irregularity', 0) > 0.1:
                 reasons.append("human timing irregularities")
             
-            if distance < threshold * 0.5:
-                confidence_desc = "Strong human voice signature detected"
-            elif distance < threshold * 0.75:
-                confidence_desc = "Clear human vocal characteristics"
-            else:
-                confidence_desc = "Human voice authenticated"
-            
             if reasons:
-                return f"{confidence_desc} with {', '.join(reasons[:3])}"
+                return f"Voice authenticated with {', '.join(reasons)} characteristic of human speech"
             else:
-                return f"{confidence_desc} (authenticity distance: {distance:.3f})"
+                return f"Voice matches human vocal characteristics (distance: {distance:.3f})"
         
-        else:
+        else:  # AI_GENERATED
             reasons = []
             
+            # Check why it's not human
             if features.get('micro_jitter', 0) < 0.3:
                 reasons.append("unnaturally stable pitch")
             
@@ -157,14 +162,7 @@ class VoiceDetector:
             if features.get('hnr', float('inf')) > 20:
                 reasons.append("too-perfect harmonic structure")
             
-            if distance > threshold * 1.5:
-                confidence_desc = "Strong AI signature detected"
-            elif distance > threshold * 1.2:
-                confidence_desc = "Clear AI-generated characteristics"
-            else:
-                confidence_desc = "Failed human authentication"
-            
             if reasons:
-                return f"{confidence_desc}: {', '.join(reasons[:3])}"
+                return f"Failed human authentication due to {', '.join(reasons)}"
             else:
-                return f"{confidence_desc} (deviation from human pattern: {distance:.3f})"
+                return f"Voice does not match human vocal patterns (distance: {distance:.3f} > threshold: {threshold:.3f})"
