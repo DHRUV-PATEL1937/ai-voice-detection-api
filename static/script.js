@@ -1,17 +1,28 @@
 // Configuration
-// Auto-detect environment
+// Auto-detect environment - works for both localhost and Render
 const API_URL = window.location.origin;
+
+console.log('🔧 API URL:', API_URL);
 
 // Global variables
 let selectedFile = null;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', function() {
+    console.log('✅ Page loaded');
+    
     const fileInput = document.getElementById('audioFile');
     const analyzeBtn = document.getElementById('analyzeBtn');
     
+    if (!fileInput || !analyzeBtn) {
+        console.error('❌ Required elements not found');
+        return;
+    }
+    
     fileInput.addEventListener('change', handleFileSelect);
     analyzeBtn.addEventListener('click', analyzeAudio);
+    
+    console.log('✅ Event listeners attached');
 });
 
 // Handle file selection
@@ -19,6 +30,8 @@ function handleFileSelect(event) {
     const file = event.target.files[0];
     
     if (!file) return;
+    
+    console.log('📁 File selected:', file.name, file.type, file.size);
     
     // Validate file type
     if (!file.type.includes('audio')) {
@@ -45,17 +58,33 @@ function handleFileSelect(event) {
 
 // Analyze audio
 async function analyzeAudio() {
-    if (!selectedFile) return;
+    if (!selectedFile) {
+        console.error('❌ No file selected');
+        return;
+    }
+    
+    console.log('🔍 Starting analysis...');
     
     // Show loading
     showSection('loadingSection');
     
     try {
         // Convert file to base64
+        console.log('📦 Converting to base64...');
         const base64Audio = await fileToBase64(selectedFile);
+        console.log('✅ Base64 conversion complete');
         
         // Get selected language
         const language = document.getElementById('language').value;
+        console.log('🌐 Language:', language);
+        
+        const requestData = {
+            audioData: base64Audio,
+            language: language,
+            userId: "test_user"
+        };
+        
+        console.log('📤 Sending request to:', `${API_URL}/api/voice-detection`);
         
         // Make API request
         const response = await fetch(`${API_URL}/api/voice-detection`, {
@@ -63,31 +92,42 @@ async function analyzeAudio() {
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({
-                audioData: base64Audio,
-                language: language,
-                userId: "test_user"
-            })
+            body: JSON.stringify(requestData)
         });
         
+        console.log('📥 Response status:', response.status);
+        
         if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.detail || 'API request failed');
+            const errorText = await response.text();
+            console.error('❌ API Error:', errorText);
+            
+            let errorMessage;
+            try {
+                const error = JSON.parse(errorText);
+                errorMessage = error.detail || error.message || 'API request failed';
+            } catch (e) {
+                errorMessage = errorText || 'API request failed';
+            }
+            
+            throw new Error(errorMessage);
         }
         
         const result = await response.json();
+        console.log('✅ Result:', result);
         
         // Display results
         displayResults(result);
         
     } catch (error) {
-        console.error('Error:', error);
+        console.error('❌ Error:', error);
         showError(error.message || 'An error occurred during analysis');
     }
 }
 
 // Display results
 function displayResults(result) {
+    console.log('📊 Displaying results:', result);
+    
     // Set classification
     const isAI = result.classification === 'AI_GENERATED';
     
@@ -97,7 +137,7 @@ function displayResults(result) {
     
     // Set confidence - FIXED: Ensure percentage is displayed
     const confidence = Math.round(result.confidenceScore * 100);
-    console.log('Confidence score:', result.confidenceScore, 'Percentage:', confidence); // Debug log
+    console.log('📈 Confidence score:', result.confidenceScore, 'Percentage:', confidence);
     
     document.getElementById('confidenceScore').textContent = `${confidence}%`;
     document.getElementById('confidenceFill').style.width = `${confidence}%`;
@@ -123,16 +163,19 @@ function displayResults(result) {
     
     // Show results
     showSection('resultsSection');
+    console.log('✅ Results displayed');
 }
 
 // Show error
 function showError(message) {
+    console.error('⚠️ Showing error:', message);
     document.getElementById('errorMessage').textContent = message;
     showSection('errorSection');
 }
 
 // Reset analysis
 function resetAnalysis() {
+    console.log('🔄 Resetting analysis');
     selectedFile = null;
     document.getElementById('audioFile').value = '';
     document.getElementById('fileName').innerHTML = '';
@@ -142,13 +185,23 @@ function resetAnalysis() {
 
 // Show specific section
 function showSection(sectionId) {
+    console.log('👁️ Showing section:', sectionId);
+    
     const sections = ['uploadSection', 'loadingSection', 'resultsSection', 'errorSection'];
     
     sections.forEach(id => {
-        document.getElementById(id).classList.add('hidden');
+        const element = document.getElementById(id);
+        if (element) {
+            element.classList.add('hidden');
+        }
     });
     
-    document.getElementById(sectionId).classList.remove('hidden');
+    const targetSection = document.getElementById(sectionId);
+    if (targetSection) {
+        targetSection.classList.remove('hidden');
+    } else {
+        console.error('❌ Section not found:', sectionId);
+    }
 }
 
 // Convert file to base64
@@ -162,7 +215,11 @@ function fileToBase64(file) {
             resolve(base64);
         };
         
-        reader.onerror = reject;
+        reader.onerror = (error) => {
+            console.error('❌ File read error:', error);
+            reject(error);
+        };
+        
         reader.readAsDataURL(file);
     });
 }

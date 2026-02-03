@@ -1,40 +1,64 @@
 """
-AI Voice Detection API
+FastAPI Application - AI Voice Detection API
 """
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
+import logging
 from pathlib import Path
-import sys
-import os
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Import detector
+from app.detector import VoiceDetector
 
-# Initialize FastAPI app
-app = FastAPI(title="AI Voice Detection API")
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+# Create FastAPI app
+app = FastAPI(
+    title="AI Voice Detection API",
+    description="Detect AI-generated voices in multiple languages",
+    version="1.0.0"
 )
 
-# Global variables
+# CRITICAL: Add CORS middleware to allow frontend to connect
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins (change in production)
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all methods
+    allow_headers=["*"],  # Allow all headers
+)
+
+# Request/Response models
+class VoiceDetectionRequest(BaseModel):
+    audioData: str  # Base64 encoded audio
+    language: str
+    userId: str
+
+class VoiceDetectionResponse(BaseModel):
+    status: str
+    language: str
+    classification: str
+    confidenceScore: float
+    explanation: str
+
+# Initialize detector
 detector = None
-model_loaded = False
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize on startup"""
-    global detector, model_loaded
+    """Initialize detector on startup"""
+    global detector
     
+    print("\n" + "="*60)
     print("🚀 Starting AI Voice Detection API...")
+    print("="*60 + "\n")
     
     # Download model if on Render
+    import os
     if os.getenv('RENDER'):
         print("📦 Downloading model on Render...")
         try:
@@ -46,141 +70,63 @@ async def startup_event():
     
     # Initialize detector
     try:
-        from app.detector import VoiceDetector
         detector = VoiceDetector()
-        model_loaded = True
         print("✅ Detector initialized")
     except Exception as e:
         print(f"⚠️ Detector initialization warning: {e}")
         print("⚠️ API will start but detection may fail")
-
-from app.schemas import DetectionRequest, DetectionResponse
+    
+    print("\n" + "="*60)
+    print("✅ API Ready!")
+    print("="*60 + "\n")
 
 @app.get("/")
 async def root():
-    """Serve the main page"""
-    try:
-        # Try to find index.html
-        possible_paths = [
-            Path(__file__).parent.parent / "static" / "index.html",
-            Path("static") / "index.html",
-            Path("/opt/render/project/src/static/index.html"),
-        ]
-        
-        for index_file in possible_paths:
-            if index_file.exists():
-                return FileResponse(str(index_file))
-        
-        # If no index.html found, return simple HTML
-        return HTMLResponse("""
-        <!DOCTYPE html>
-        <html>
-        <head><title>AI Voice Detection API</title></head>
-        <body>
-            <h1>AI Voice Detection API</h1>
-            <p>Status: Running ✅</p>
-            <p>API Endpoint: <code>/api/voice-detection</code></p>
-            <p>Health Check: <code>/health</code></p>
-        </body>
-        </html>
-        """)
-    except Exception as e:
-        return {"status": "running", "error": str(e)}
+    """Serve the frontend"""
+    return FileResponse("static/index.html")
 
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
     return {
         "status": "healthy",
-        "message": "AI Voice Detection API is running",
-        "model_loaded": model_loaded
+        "detector_ready": detector is not None
     }
 
-@app.get("/script.js")
-async def get_script():
-    """Serve script.js"""
-    try:
-        possible_paths = [
-            Path(__file__).parent.parent / "static" / "script.js",
-            Path("static") / "script.js",
-            Path("/opt/render/project/src/static/script.js"),
-        ]
-        
-        for script_file in possible_paths:
-            if script_file.exists():
-                return FileResponse(str(script_file), media_type="application/javascript")
-        
-        raise HTTPException(status_code=404, detail="script.js not found")
-    except Exception as e:
-        raise HTTPException(status_code=404, detail=str(e))
-
-@app.get("/style.css")
-async def get_style():
-    """Serve style.css"""
-    try:
-        possible_paths = [
-            Path(__file__).parent.parent / "static" / "style.css",
-            Path("static") / "style.css",
-            Path("/opt/render/project/src/static/style.css"),
-        ]
-        
-        for style_file in possible_paths:
-            if style_file.exists():
-                return FileResponse(str(style_file), media_type="text/css")
-        
-        raise HTTPException(status_code=404, detail="style.css not found")
-    except Exception as e:
-        raise HTTPException(status_code=404, detail=str(e))
-
-@app.post("/api/voice-detection", response_model=DetectionResponse)
-async def detect_voice(request: DetectionRequest):
+@app.post("/api/voice-detection", response_model=VoiceDetectionResponse)
+async def detect_voice(request: VoiceDetectionRequest):
     """Detect if voice is AI-generated or human"""
     
-    if not model_loaded:
-        return DetectionResponse(
-            status="error",
-            language=request.language,
-            classification="UNKNOWN",
-            confidenceScore=0.0,
-            explanation="Model is still loading, please try again in a moment"
-        )
+    logger.info(f"📥 Detection request - Language: {request.language}, User: {request.userId}")
     
     if detector is None:
-        return DetectionResponse(
-            status="error",
-            language=request.language,
-            classification="UNKNOWN",
-            confidenceScore=0.0,
-            explanation="Detector not initialized"
+        logger.error("❌ Detector not initialized")
+        raise HTTPException(
+            status_code=503,
+            detail="Model is still loading, please try again in a moment"
         )
     
     try:
-        print(f"📞 Request from: {request.userId} ({request.language})")
-        
+        # Perform detection
         result = detector.detect(
             base64_audio=request.audioData,
             language=request.language
         )
         
-        print(f"   ✅ Classified as {result['classification']} ({result['confidenceScore']*100:.2f}%)")
+        logger.info(f"✅ Detection complete - {result['classification']} ({result['confidenceScore']:.2f})")
         
-        return DetectionResponse(**result)
+        return VoiceDetectionResponse(**result)
         
     except Exception as e:
-        print(f"   ❌ Error: {e}")
-        import traceback
-        traceback.print_exc()
-        
-        # Return error as valid JSON (not HTTPException)
-        return DetectionResponse(
-            status="error",
-            language=request.language,
-            classification="ERROR",
-            confidenceScore=0.0,
-            explanation=f"Detection failed: {str(e)}"
+        logger.error(f"❌ Detection failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Detection failed: {str(e)}"
         )
 
-# Mount static files as fallback
-static_path = Path(__file__).parent.parent / "static"
-if static_path.exists():
-    app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
+# Mount static files AFTER defining routes
+app.mount("/", StaticFiles(directory="static", html=True), name="static")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
