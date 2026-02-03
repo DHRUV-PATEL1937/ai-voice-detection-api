@@ -8,9 +8,14 @@ from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 import logging
 from pathlib import Path
+import os
 
 # Import detector
-from app.detector import VoiceDetector
+# Ensure app.detector exists or mock it if necessary for build
+try:
+    from app.detector import VoiceDetector
+except ImportError:
+    VoiceDetector = None
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -23,18 +28,18 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CRITICAL: Add CORS middleware to allow frontend to connect
+# CRITICAL: Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],  # Allow all methods
-    allow_headers=["*"],  # Allow all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Request/Response models
 class VoiceDetectionRequest(BaseModel):
-    audioData: str  # Base64 encoded audio
+    audioData: str
     language: str
     userId: str
 
@@ -52,134 +57,61 @@ detector = None
 async def startup_event():
     """Initialize detector on startup"""
     global detector
-    
     print("\n" + "="*60)
     print("🚀 Starting AI Voice Detection API...")
-    print("="*60 + "\n")
     
     # Download model if on Render
-    import os
     if os.getenv('RENDER'):
         print("📦 Downloading model on Render...")
         try:
             from scripts.download_model import download_and_extract_model
             download_and_extract_model()
-            print("✅ Model downloaded")
+            print("✅ Model downloaded/verified")
         except Exception as e:
             print(f"⚠️ Model download warning: {e}")
     
     # Initialize detector
     try:
-        detector = VoiceDetector()
-        print("✅ Detector initialized")
+        if VoiceDetector:
+            detector = VoiceDetector()
+            print("✅ Detector initialized")
+        else:
+            print("⚠️ VoiceDetector class not imported")
     except Exception as e:
         print(f"⚠️ Detector initialization warning: {e}")
-        print("⚠️ API will start but detection may fail")
     
-    print("\n" + "="*60)
     print("✅ API Ready!")
     print("="*60 + "\n")
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
-    return {
-        "status": "healthy",
-        "detector_ready": detector is not None
-    }
-
-@app.get("/test")
-async def test_page():
-    """Simple test page to verify Render is working"""
-    html_content = """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Render Test</title>
-    </head>
-    <body>
-        <h1>✅ Render is serving pages!</h1>
-        <p>API URL: <span id="url"></span></p>
-        <button onclick="testAPI()">Test API</button>
-        <div id="result"></div>
-        
-        <script>
-            document.getElementById('url').textContent = window.location.origin;
-            
-            async function testAPI() {
-                try {
-                    const response = await fetch('/health');
-                    const data = await response.json();
-                    document.getElementById('result').innerHTML = 
-                        '<p style="color: green;">✅ API is working! ' + JSON.stringify(data) + '</p>';
-                } catch (error) {
-                    document.getElementById('result').innerHTML = 
-                        '<p style="color: red;">❌ API error: ' + error.message + '</p>';
-                }
-            }
-        </script>
-    </body>
-    </html>
-    """
-    return HTMLResponse(content=html_content)
+    return {"status": "healthy", "detector_ready": detector is not None}
 
 @app.post("/api/voice-detection", response_model=VoiceDetectionResponse)
 async def detect_voice(request: VoiceDetectionRequest):
-    """Detect if voice is AI-generated or human"""
-    
-    logger.info(f"📥 Detection request - Language: {request.language}, User: {request.userId}")
+    logger.info(f"📥 Detection request - Language: {request.language}")
     
     if detector is None:
-        logger.error("❌ Detector not initialized")
-        raise HTTPException(
-            status_code=503,
-            detail="Model is still loading, please try again in a moment"
-        )
+        raise HTTPException(status_code=503, detail="Model is loading")
     
     try:
-        # Perform detection
-        result = detector.detect(
-            base64_audio=request.audioData,
-            language=request.language
-        )
-        
-        logger.info(f"✅ Detection complete - {result['classification']} ({result['confidenceScore']:.2f})")
-        
+        result = detector.detect(base64_audio=request.audioData, language=request.language)
         return VoiceDetectionResponse(**result)
-        
     except Exception as e:
         logger.error(f"❌ Detection failed: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Detection failed: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=str(e))
 
-# Root route - serve index.html
+# ---------------------------------------------------------
+# STATIC FILE CONFIGURATION (The Fix)
+# ---------------------------------------------------------
+
+# 1. Mount static files FIRST to /static
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# 2. Serve index.html at root
 @app.get("/")
 async def root():
-    """Serve the frontend"""
-    index_path = Path("static/index.html")
-    
-    if not index_path.exists():
-        logger.error(f"❌ index.html not found at: {index_path.absolute()}")
-        return HTMLResponse(
-            content="""
-            <h1>❌ Error: index.html not found</h1>
-            <p>Expected location: static/index.html</p>
-            <p><a href="/test">Go to test page</a></p>
-            """,
-            status_code=500
-        )
-    
-    logger.info(f"📄 Serving index.html from: {index_path.absolute()}")
-    return FileResponse(index_path)
-
-# Serve static files (CSS, JS, etc.)
-try:
-    app.mount("/static", StaticFiles(directory="static"), name="static")
-    logger.info("✅ Static files mounted at /static/")
-except Exception as e:
-    logger.error(f"❌ Failed to mount static files: {e}")
+    return FileResponse('static/index.html')
 
 if __name__ == "__main__":
     import uvicorn
