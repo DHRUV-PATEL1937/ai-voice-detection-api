@@ -1,61 +1,57 @@
 """
-Download model from Google Drive on server startup
+Download model from Google Drive for deployment
 """
-import os
+import gdown
 import zipfile
 from pathlib import Path
-import gdown
+import os
 
 def download_and_extract_model():
-    """Download and extract model from Google Drive"""
+    """Download model from Google Drive"""
     
-    model_dir = Path('saved_models')
+    model_file_id = os.getenv('MODEL_FILE_ID')
     
-    # Check if model already exists
-    existing_models = list(model_dir.glob('*/best_model.pth'))
-    if existing_models:
-        print(f"✅ Model already exists at: {existing_models[0]}")
-        return str(existing_models[0])
+    if not model_file_id:
+        print("⚠️ MODEL_FILE_ID not set, skipping download")
+        return
     
-    print("📥 Downloading model from Google Drive...")
+    print(f"📦 Downloading model from Google Drive...")
+    print(f"   File ID: {model_file_id}")
     
-    # Get file ID from environment variable
-    file_id = '1lx0gQTQLodpugBIt26u-_1p1G0GZ9eR1'
+    # Download URL
+    url = f"https://drive.google.com/uc?id={model_file_id}"
     
-    if not file_id:
-        print("⚠️  MODEL_FILE_ID not set, skipping download")
-        return None
-    
-    # Download from Google Drive
-    url = f'https://drive.google.com/uc?id={file_id}'
-    output = 'model.zip'
+    # Download to temp file
+    output = "model.zip"
     
     try:
-        print(f"   Downloading from Google Drive...")
-        gdown.download(url, output, quiet=False, fuzzy=True)
-        
-        # Extract
-        print("📦 Extracting model...")
-        model_dir.mkdir(parents=True, exist_ok=True)
-        
+        gdown.download(url, output, quiet=False)
+        print(f"✅ Downloaded to {output}")
+    except Exception as e:
+        print(f"❌ Download failed: {e}")
+        raise
+    
+    # Extract
+    try:
         with zipfile.ZipFile(output, 'r') as zip_ref:
             zip_ref.extractall('.')
+        print(f"✅ Extracted model files")
         
-        # Cleanup
+        # Remove zip
         os.remove(output)
+        print(f"✅ Cleaned up zip file")
         
-        # Verify
-        extracted_models = list(model_dir.glob('*/best_model.pth'))
-        if extracted_models:
-            print(f"✅ Model ready: {extracted_models[0]}")
-            return str(extracted_models[0])
+        # Verify model exists
+        if Path('best_model.pth').exists():
+            print(f"✅ Model ready at: best_model.pth")
+        elif Path('saved_models/best_model.pth').exists():
+            print(f"✅ Model ready at: saved_models/best_model.pth")
         else:
-            print("❌ Model file not found after extraction")
-            return None
-            
+            raise FileNotFoundError("Model file not found after extraction")
+        
     except Exception as e:
-        print(f"❌ Error: {e}")
-        return None
+        print(f"❌ Extraction failed: {e}")
+        raise
 
 if __name__ == "__main__":
     download_and_extract_model()

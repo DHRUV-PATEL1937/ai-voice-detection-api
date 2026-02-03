@@ -136,10 +136,22 @@ async def get_style():
 async def detect_voice(request: DetectionRequest):
     """Detect if voice is AI-generated or human"""
     
-    if not model_loaded or detector is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Model is still loading, please try again in a moment"
+    if not model_loaded:
+        return DetectionResponse(
+            status="error",
+            language=request.language,
+            classification="UNKNOWN",
+            confidenceScore=0.0,
+            explanation="Model is still loading, please try again in a moment"
+        )
+    
+    if detector is None:
+        return DetectionResponse(
+            status="error",
+            language=request.language,
+            classification="UNKNOWN",
+            confidenceScore=0.0,
+            explanation="Detector not initialized"
         )
     
     try:
@@ -158,7 +170,15 @@ async def detect_voice(request: DetectionRequest):
         print(f"   ❌ Error: {e}")
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        
+        # Return error as valid JSON (not HTTPException)
+        return DetectionResponse(
+            status="error",
+            language=request.language,
+            classification="ERROR",
+            confidenceScore=0.0,
+            explanation=f"Detection failed: {str(e)}"
+        )
 
 # Mount static files as fallback
 static_path = Path(__file__).parent.parent / "static"
