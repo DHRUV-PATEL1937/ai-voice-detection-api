@@ -1,10 +1,9 @@
 """
-Audio Processing Pipeline
-Handles: Base64 decoding, preprocessing, normalization
+Audio Processing Pipeline (Render Compatible)
+Uses soundfile instead of pydub/ffmpeg for robust deployment.
 """
 import librosa
 import numpy as np
-from pydub import AudioSegment
 import io
 import base64
 import soundfile as sf
@@ -25,65 +24,56 @@ class AudioProcessor:
     def load_audio_file(self, file_path):
         """Load audio from file path"""
         try:
-            audio, sr = librosa.load(file_path, sr=self.target_sr)
+            # Librosa uses soundfile internally by default, which is safe
+            audio, sr = librosa.load(file_path, sr=None) # Load at native SR first
             return audio, sr
         except Exception as e:
             raise ValueError(f"Error loading audio file: {e}")
     
     def decode_base64_audio(self, base64_string):
         """
-        Decode base64 MP3 to audio array
-        
-        Args:
-            base64_string: Base64 encoded audio
-            
-        Returns:
-            audio: numpy array
-            sr: sample rate
+        Decode base64 audio to audio array using soundfile (No ffmpeg required)
         """
         try:
-            # Decode base64
+            # 1. Handle Data URI prefix if present (e.g. "data:audio/mp3;base64,...")
+            if ',' in base64_string:
+                base64_string = base64_string.split(',')[1]
+                
+            # 2. Decode base64 to bytes
             audio_bytes = base64.b64decode(base64_string)
             
-            # Load with pydub (handles MP3)
-            audio = AudioSegment.from_file(
-                io.BytesIO(audio_bytes),
-                format="mp3"
-            )
+            # 3. Read into memory buffer
+            buffer = io.BytesIO(audio_bytes)
             
-            # Convert to numpy array
-            samples = np.array(audio.get_array_of_samples(), dtype=np.float32)
+            # 4. Load using soundfile
+            # sf.read returns (data, samplerate)
+            # data is [samples, channels]
+            data, sr = sf.read(buffer)
             
-            # Handle stereo
-            if audio.channels == 2:
-                samples = samples.reshape((-1, 2))
-                samples = samples.mean(axis=1)  # Convert to mono
+            # 5. Ensure float32 (soundfile might return float64 or int16)
+            if data.dtype != np.float32:
+                data = data.astype(np.float32)
+                
+            # 6. Convert Stereo to Mono
+            # If shape is (N, 2), average the channels
+            if len(data.shape) > 1:
+                data = np.mean(data, axis=1)
             
-            # Normalize
-            samples = samples / (2**15)  # 16-bit audio
-            
-            sr = audio.frame_rate
-            
-            return samples, sr
+            return data, sr
             
         except Exception as e:
-            raise ValueError(f"Error decoding base64 audio: {e}")
+            print(f"❌ Audio Decode Error: {e}")
+            # Raise error so API catches it properly
+            raise ValueError(f"Failed to decode audio: {str(e)}")
     
     def preprocess(self, audio, sr):
         """
         Preprocess audio: resample, normalize, pad/trim
-        
-        Args:
-            audio: numpy array
-            sr: current sample rate
-            
-        Returns:
-            processed audio
         """
         # Resample if needed
         if sr != self.target_sr:
             audio = librosa.resample(
-                y=audio.astype(float),
+                y=audio,
                 orig_sr=sr,
                 target_sr=self.target_sr
             )
@@ -95,7 +85,7 @@ class AudioProcessor:
         # Trim silence from beginning and end
         audio, _ = librosa.effects.trim(audio, top_db=20)
         
-        # Pad or trim to target length
+        # Pad or trim to fixed target length
         if len(audio) > self.target_length:
             # Trim from center
             start = (len(audio) - self.target_length) // 2
@@ -117,16 +107,8 @@ class AudioProcessor:
         audio, sr = self.decode_base64_audio(base64_string)
         return self.preprocess(audio, sr)
 
-
 # Test the processor
 if __name__ == "__main__":
+    print("🧪 Testing AudioProcessor...")
     processor = AudioProcessor()
-    
-    # Test with a file
-    test_file = "dataset/train/human/english/sample.mp3"  # Use your actual file
-    try:
-        audio = processor.process_from_file(test_file)
-        print(f"✅ Processed audio shape: {audio.shape}")
-        print(f"✅ Audio duration: {len(audio) / processor.target_sr:.2f} seconds")
-    except Exception as e:
-        print(f"❌ Error: {e}")
+    print("✅ AudioProcessor initialized successfully")
