@@ -1,5 +1,6 @@
 // Configuration
-const API_URL = "https://ai-voice-detection-api-8w9j.onrender.com/api/voice-detection";
+// ✅ FIX: Set this to JUST the domain (No /api/voice-detection at the end)
+const API_URL = "https://ai-voice-detection-api-8w9j.onrender.com";
 
 // Enhanced logging
 function log(emoji, message, data = null) {
@@ -48,8 +49,8 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     // Attach event listeners
-    elements.audioFile.addEventListener('change', handleFileSelect);
-    elements.analyzeBtn.addEventListener('click', analyzeAudio);
+    if (elements.audioFile) elements.audioFile.addEventListener('change', handleFileSelect);
+    if (elements.analyzeBtn) elements.analyzeBtn.addEventListener('click', analyzeAudio);
     
     log('✅', 'Event listeners attached');
     
@@ -86,9 +87,9 @@ function handleFileSelect(event) {
     });
     
     // Validate file type
-    if (!file.type.includes('audio')) {
+    if (!file.type.includes('audio') && !file.name.endsWith('.mp3') && !file.name.endsWith('.wav')) {
         log('❌', 'Invalid file type:', file.type);
-        showError('Please select an audio file');
+        showError('Please select a valid audio file (MP3/WAV)');
         return;
     }
     
@@ -104,7 +105,7 @@ function handleFileSelect(event) {
     // Display file name
     const fileNameElement = document.getElementById('fileName');
     if (fileNameElement) {
-        fileNameElement.textContent = `Selected: ${file.name} (${formatFileSize(file.size)})`;
+        fileNameElement.innerHTML = `<strong>Selected:</strong> ${file.name} (${formatFileSize(file.size)})`;
     }
     
     // Enable analyze button
@@ -113,6 +114,10 @@ function handleFileSelect(event) {
         analyzeBtn.disabled = false;
         log('✅', 'Analyze button enabled');
     }
+
+    // Clear previous results/errors
+    hideSection('resultsSection');
+    hideSection('errorSection');
 }
 
 // Analyze audio
@@ -134,23 +139,27 @@ async function analyzeAudio() {
         log('✅', 'Base64 conversion complete, length:', base64Audio.length);
         
         // Get selected language
-        const language = document.getElementById('language').value;
+        const languageElement = document.getElementById('language');
+        const language = languageElement ? languageElement.value : "english";
         log('🌐', 'Language:', language);
         
         const requestData = {
-            audioData: base64Audio,
+            audioBase64: base64Audio, // Was audioData
             language: language,
-            userId: "test_user"
+            audioFormat: "mp3"        // Added this required field
+            // userId removed
         };
         
-        const apiUrl = `${API_URL}/api/voice-detection`;
-        log('📤', 'Sending request to:', apiUrl);
+        // Construct the full API endpoint
+        const apiEndpoint = `${API_URL}/api/voice-detection`;
+        log('📤', 'Sending request to:', apiEndpoint);
         
         // Make API request
-        const response = await fetch(apiUrl, {
+        const response = await fetch(apiEndpoint, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+                'x-api-key': 'sk_test_123456789' // Ensure this matches your backend settings
             },
             body: JSON.stringify(requestData)
         });
@@ -182,6 +191,12 @@ async function analyzeAudio() {
         log('❌', 'Error during analysis:', error);
         console.error('Full error:', error);
         showError(error.message || 'An error occurred during analysis');
+        // If error occurs, show upload section again so user can retry
+        // But keep error section visible
+        const uploadSection = document.getElementById('uploadSection');
+        if(uploadSection) uploadSection.classList.remove('hidden');
+        const loadingSection = document.getElementById('loadingSection');
+        if(loadingSection) loadingSection.classList.add('hidden');
     }
 }
 
@@ -257,7 +272,13 @@ function showError(message) {
         errorMessage.textContent = message;
     }
     
-    showSection('errorSection');
+    // Directly manipulating class here to ensure error shows on top of upload
+    const errorSection = document.getElementById('errorSection');
+    if (errorSection) errorSection.classList.remove('hidden');
+    
+    // Hide loading if it was showing
+    const loadingSection = document.getElementById('loadingSection');
+    if (loadingSection) loadingSection.classList.add('hidden');
 }
 
 // Reset analysis
@@ -271,13 +292,13 @@ function resetAnalysis() {
     const analyzeBtn = document.getElementById('analyzeBtn');
     
     if (audioFile) audioFile.value = '';
-    if (fileName) fileName.textContent = '';
+    if (fileName) fileName.textContent = ''; // Changed from innerHTML to textContent for safety
     if (analyzeBtn) analyzeBtn.disabled = true;
     
     showSection('uploadSection');
 }
 
-// Show specific section
+// Helper functions to toggle sections
 function showSection(sectionId) {
     log('👁️', 'Showing section:', sectionId);
     
@@ -296,6 +317,11 @@ function showSection(sectionId) {
     } else {
         log('❌', 'Section not found:', sectionId);
     }
+}
+
+function hideSection(id) {
+    const el = document.getElementById(id);
+    if (el) el.classList.add('hidden');
 }
 
 // Convert file to base64
@@ -323,6 +349,9 @@ function formatFileSize(bytes) {
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
+
+// Expose reset function to global scope
+window.resetAnalysis = resetAnalysis;
 
 // Log when script finishes loading
 log('✅', 'Script fully loaded and ready');
