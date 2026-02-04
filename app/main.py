@@ -32,17 +32,18 @@ app = FastAPI(
 # CRITICAL: CORS Middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins (Firebase, Localhost, etc.)
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods (POST, GET, etc.)
-    allow_headers=["*"],  # Allows all headers (API Key, Content-Type)
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-# Request/Response models
+# ✅ UPDATED: Request model to match Hackathon Tester
 class VoiceDetectionRequest(BaseModel):
-    audioData: str  # Base64 encoded audio
     language: str
-    userId: str
+    audioFormat: str       # Changed to match Tester
+    audioBase64: str       # Changed from audioData to audioBase64
+    # userId removed as Tester doesn't send it
 
 class VoiceDetectionResponse(BaseModel):
     status: str
@@ -56,84 +57,49 @@ detector = None
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize detector on startup"""
     global detector
+    print("🚀 Starting API...")
     
-    print("\n" + "="*60)
-    print("🚀 Starting AI Voice Detection API (Backend)...")
-    print("="*60 + "\n")
-    
-    # Download model if on Render
     if os.getenv('RENDER'):
-        print("📦 Checking environment...")
         try:
             from scripts.download_model import download_and_extract_model
             download_and_extract_model()
-        except ImportError:
-            pass 
-        except Exception as e:
-            print(f"⚠️ Model download warning: {e}")
+        except: pass
     
-    # Initialize detector
     try:
         if VoiceDetector:
             detector = VoiceDetector()
-            print("✅ Detector initialized successfully")
-        else:
-            print("❌ VoiceDetector class could not be imported")
+            print("✅ Detector initialized")
     except Exception as e:
-        print(f"❌ Detector initialization failed: {e}")
-        print("⚠️ API will start, but detection endpoints will error.")
-    
-    print("\n" + "="*60)
-    print("✅ API Ready to accept connections!")
-    print("="*60 + "\n")
-
-@app.get("/")
-async def root():
-    """Root endpoint - JSON info only (No UI)"""
-    return {
-        "status": "online",
-        "message": "AI Voice Detection API is running. Connect via Frontend.",
-        "docs_url": "/docs"
-    }
+        print(f"❌ Detector failed: {e}")
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
-    return {
-        "status": "healthy",
-        "detector_ready": detector is not None
-    }
+    return {"status": "healthy", "detector_ready": detector is not None}
 
-# ✅ Handle GET requests to prevent 405 errors
+# GET Handler to prevent 405 errors
 @app.get("/api/voice-detection")
 async def get_voice_detection_info():
     return {
         "status": "online",
-        "message": "This endpoint expects a POST request with audio data. Use the frontend to upload a file."
+        "message": "Send POST request with audioBase64"
     }
 
-# ✅ CRITICAL FIX: Changed 'async def' to 'def'
-# This runs the heavy AI processing in a separate thread pool,
-# preventing the server from freezing/locking up during analysis.
 @app.post("/api/voice-detection", response_model=VoiceDetectionResponse)
 def detect_voice(request: VoiceDetectionRequest):
     """Detect if voice is AI-generated or human"""
     
-    logger.info(f"📥 Request received - Language: {request.language}, User: {request.userId}")
+    # Updated logging to match new fields
+    logger.info(f"📥 Request received - Language: {request.language}, Format: {request.audioFormat}")
     
     if detector is None:
         logger.error("❌ Detector not initialized")
-        raise HTTPException(
-            status_code=503,
-            detail="Model is still loading or failed to initialize. Please check server logs."
-        )
+        raise HTTPException(status_code=503, detail="Model is loading")
     
     try:
-        # Perform detection
+        # Perform detection using audioBase64
         result = detector.detect(
-            base64_audio=request.audioData,
+            base64_audio=request.audioBase64,  # ✅ Using new field name
             language=request.language
         )
         
@@ -142,10 +108,7 @@ def detect_voice(request: VoiceDetectionRequest):
         
     except Exception as e:
         logger.error(f"❌ Processing error: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Analysis failed: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
