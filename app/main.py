@@ -30,7 +30,6 @@ app = FastAPI(
 )
 
 # CRITICAL: CORS Middleware
-# This allows your Firebase UI (or any other frontend) to connect to this API.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Allows all origins (Firebase, Localhost, etc.)
@@ -64,15 +63,14 @@ async def startup_event():
     print("🚀 Starting AI Voice Detection API (Backend)...")
     print("="*60 + "\n")
     
-    # Download model if on Render (Optional: depends if you committed the model)
+    # Download model if on Render
     if os.getenv('RENDER'):
         print("📦 Checking environment...")
         try:
-            # If you have the script, run it. If not, this block is skipped.
             from scripts.download_model import download_and_extract_model
             download_and_extract_model()
         except ImportError:
-            pass # Script might not exist, assuming model is present via Git
+            pass 
         except Exception as e:
             print(f"⚠️ Model download warning: {e}")
     
@@ -106,6 +104,14 @@ async def health_check():
     return {
         "status": "healthy",
         "detector_ready": detector is not None
+    }
+
+# ✅ NEW: Handle GET requests to prevent 405 errors and "loops"
+@app.get("/api/voice-detection")
+async def get_voice_detection_info():
+    return {
+        "status": "online",
+        "message": "This endpoint expects a POST request with audio data. Use the frontend to upload a file."
     }
 
 @app.post("/api/voice-detection", response_model=VoiceDetectionResponse)
