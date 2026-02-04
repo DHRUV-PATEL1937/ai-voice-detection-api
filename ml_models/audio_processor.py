@@ -1,11 +1,13 @@
 """
-Audio Processing Pipeline (Ultra-Fast for Render Free Tier)
+Audio Processing Pipeline (Render Compatible & Fast)
+Uses Scipy for resampling to avoid 'samplerate' dependency errors.
 """
 import librosa
 import numpy as np
 import io
 import base64
 import soundfile as sf
+import scipy.signal
 
 class AudioProcessor:
     """Process audio files for ML pipeline"""
@@ -14,12 +16,22 @@ class AudioProcessor:
         """
         Args:
             target_sr: Target sample rate (16kHz)
-            target_duration: REDUCED to 4.0 seconds for speed
+            target_duration: 4.0 seconds (Ultra-fast processing)
         """
         self.target_sr = target_sr
         self.target_duration = target_duration
         self.target_length = int(target_sr * target_duration)
     
+    def load_audio_file(self, file_path):
+        """Load audio from file path"""
+        try:
+            # Librosa uses soundfile internally by default
+            # Load at native SR first to avoid librosa's internal resampling
+            audio, sr = librosa.load(file_path, sr=None) 
+            return audio, sr
+        except Exception as e:
+            raise ValueError(f"Error loading audio file: {e}")
+
     def decode_base64_audio(self, base64_string):
         try:
             # 1. Handle Data URI
@@ -31,17 +43,16 @@ class AudioProcessor:
             buffer = io.BytesIO(audio_bytes)
             
             # 3. Load using soundfile
-            # ✅ ULTRA-OPTIMIZATION: Read only first 4 seconds
-            # 16000 Hz * 4 sec = 64,000 samples (plus safety margin)
-            # This makes processing instant.
-            MAX_FRAMES = 80000 
+            # ✅ Read only first 4 seconds (approx 64k samples at 16k, or 192k at 48k)
+            # 200,000 frames is a safe upper limit for <5s of audio
+            MAX_FRAMES = 200000 
             data, sr = sf.read(buffer, stop=MAX_FRAMES)
             
             # 4. Ensure float32
             if data.dtype != np.float32:
                 data = data.astype(np.float32)
                 
-            # 5. Mono
+            # 5. Mono conversion
             if len(data.shape) > 1:
                 data = np.mean(data, axis=1)
             
@@ -53,26 +64,27 @@ class AudioProcessor:
     
     def preprocess(self, audio, sr):
         """
-        Preprocess with fast resampling
+        Preprocess with Scipy resampling (Bypasses librosa dependency issues)
         """
-        # Resample if needed
+        # 1. Resample using Scipy (Fast & Robust)
         if sr != self.target_sr:
-            # ✅ OPTIMIZATION: Use 'linear' resampling (Much faster than kaiser_best)
-            audio = librosa.resample(
-                y=audio,
-                orig_sr=sr,
-                target_sr=self.target_sr,
-                res_type='linear' 
-            )
+            # Calculate number of samples after resampling
+            number_of_samples = int(len(audio) * float(self.target_sr) / sr)
+            # Scipy's resample is faster and doesn't need external C libraries
+            audio = scipy.signal.resample(audio, number_of_samples)
         
-        # Normalize
+        # 2. Normalize
         if np.max(np.abs(audio)) > 0:
             audio = audio / np.max(np.abs(audio))
         
-        # Trim silence (fast version)
-        audio, _ = librosa.effects.trim(audio, top_db=20)
+        # 3. Trim silence
+        # We allow librosa here as trim usually works fine without 'samplerate'
+        try:
+            audio, _ = librosa.effects.trim(audio, top_db=20)
+        except:
+            pass # Skip trim if it fails, not critical
         
-        # Pad or trim to EXACT target length
+        # 4. Pad or trim to EXACT target length
         if len(audio) > self.target_length:
             start = (len(audio) - self.target_length) // 2
             audio = audio[start:start + self.target_length]
@@ -82,6 +94,17 @@ class AudioProcessor:
         
         return audio
     
+    def process_from_file(self, file_path):
+        """Complete processing pipeline from file"""
+        audio, sr = self.load_audio_file(file_path)
+        return self.preprocess(audio, sr)
+    
     def process_from_base64(self, base64_string):
         audio, sr = self.decode_base64_audio(base64_string)
         return self.preprocess(audio, sr)
+
+# Test the processor
+if __name__ == "__main__":
+    print("🧪 Testing AudioProcessor...")
+    processor = AudioProcessor()
+    print("✅ AudioProcessor initialized successfully")
