@@ -84,6 +84,20 @@ class VoiceDetector:
             self.model.load_state_dict(checkpoint['model_state_dict'])
             self.model = self.model.to(self.device)
             self.model.eval()
+            
+            # ✅ OPTIMIZATION: Apply Dynamic Quantization for 2x CPU Speedup
+            if self.device.type == 'cpu':
+                print("⚡ Applying dynamic quantization for CPU speedup...")
+                try:
+                    self.model = torch.quantization.quantize_dynamic(
+                        self.model, 
+                        {torch.nn.Linear, torch.nn.LSTM, torch.nn.GRU}, 
+                        dtype=torch.qint8
+                    )
+                    print("⚡ Model quantized successfully")
+                except Exception as q_err:
+                    print(f"⚠️ Quantization skipped: {q_err}")
+
             print(f"✅ Model initialized")
         except Exception as e:
             print(f"❌ Failed to initialize model: {e}")
@@ -142,15 +156,10 @@ class VoiceDetector:
                 classification = "HUMAN" if is_human else "AI_GENERATED"
                 
                 # IMPROVED CONFIDENCE CALCULATION
-                # Calculate how far we are from the threshold
                 if is_human:
-                    # For human: closer to 0 = more confident
-                    # Map distance [0, threshold] to confidence [100%, 65%]
                     normalized_distance = min(distance / self.threshold, 1.0)
                     confidence = 100 - (normalized_distance * 35)  # 100% to 65%
                 else:
-                    # For AI: farther from threshold = more confident
-                    # Map distance [threshold, 2*threshold] to confidence [65%, 100%]
                     excess_distance = distance - self.threshold
                     normalized_excess = min(excess_distance / self.threshold, 1.0)
                     confidence = 65 + (normalized_excess * 35)  # 65% to 100%

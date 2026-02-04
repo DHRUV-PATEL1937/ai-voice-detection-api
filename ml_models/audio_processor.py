@@ -46,9 +46,10 @@ class AudioProcessor:
             buffer = io.BytesIO(audio_bytes)
             
             # 4. Load using soundfile
-            # sf.read returns (data, samplerate)
-            # data is [samples, channels]
-            data, sr = sf.read(buffer)
+            # ✅ OPTIMIZATION: Read only first ~30 seconds (1.5M frames at 48k)
+            # This prevents 5-minute songs from crashing the server
+            MAX_FRAMES = 1500000 
+            data, sr = sf.read(buffer, stop=MAX_FRAMES)
             
             # 5. Ensure float32 (soundfile might return float64 or int16)
             if data.dtype != np.float32:
