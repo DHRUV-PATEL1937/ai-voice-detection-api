@@ -1,5 +1,5 @@
 // Configuration
-const API_URL = window.location.origin;
+const API_URL = "https://ai-voice-detection-api-8w9j.onrender.com/api/voice-detection";
 
 // Enhanced logging
 function log(emoji, message, data = null) {

@@ -1,347 +1,89 @@
 <!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Voice Detection</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Welcome to Firebase Hosting</title>
 
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-        }
+    <!-- update the version number as needed -->
+    <script defer src="/__/firebase/12.8.0/firebase-app-compat.js"></script>
+    <!-- include only the Firebase features as you need -->
+    <script defer src="/__/firebase/12.8.0/firebase-auth-compat.js"></script>
+    <script defer src="/__/firebase/12.8.0/firebase-database-compat.js"></script>
+    <script defer src="/__/firebase/12.8.0/firebase-firestore-compat.js"></script>
+    <script defer src="/__/firebase/12.8.0/firebase-functions-compat.js"></script>
+    <script defer src="/__/firebase/12.8.0/firebase-messaging-compat.js"></script>
+    <script defer src="/__/firebase/12.8.0/firebase-storage-compat.js"></script>
+    <script defer src="/__/firebase/12.8.0/firebase-analytics-compat.js"></script>
+    <script defer src="/__/firebase/12.8.0/firebase-remote-config-compat.js"></script>
+    <script defer src="/__/firebase/12.8.0/firebase-performance-compat.js"></script>
+    <!-- 
+      initialize the SDK after all desired features are loaded, set useEmulator to false
+      to avoid connecting the SDK to running emulators.
+    -->
+    <script defer src="/__/firebase/init.js?useEmulator=true"></script>
 
-        .container {
-            background: white;
-            border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-            max-width: 600px;
-            width: 100%;
-            padding: 40px;
-        }
-
-        .header {
-            text-align: center;
-            margin-bottom: 30px;
-        }
-
-        .header h1 {
-            font-size: 2.5em;
-            color: #333;
-            margin-bottom: 10px;
-        }
-
-        .header .icon {
-            font-size: 3em;
-            margin-bottom: 10px;
-        }
-
-        .header p {
-            color: #666;
-            font-size: 1.1em;
-        }
-
-        .upload-section {
-            text-align: center;
-            padding: 30px;
-            border: 2px dashed #667eea;
-            border-radius: 10px;
-            margin-bottom: 20px;
-            transition: all 0.3s;
-        }
-
-        .upload-section:hover {
-            border-color: #764ba2;
-            background: #f8f9ff;
-        }
-
-        .file-input {
-            display: none;
-        }
-
-        .upload-btn {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 15px 30px;
-            border: none;
-            border-radius: 50px;
-            font-size: 1.1em;
-            cursor: pointer;
-            transition: transform 0.2s;
-        }
-
-        .upload-btn:hover {
-            transform: scale(1.05);
-        }
-
-        .language-select {
-            width: 100%;
-            padding: 12px;
-            border: 2px solid #667eea;
-            border-radius: 10px;
-            font-size: 1em;
-            margin: 20px 0;
-        }
-
-        .analyze-btn {
-            width: 100%;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 15px;
-            border: none;
-            border-radius: 10px;
-            font-size: 1.2em;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-
-        .analyze-btn:hover:not(:disabled) {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
-        }
-
-        .analyze-btn:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-        }
-
-        .results-section {
-            margin-top: 30px;
-        }
-
-        .result-card {
-            background: #f8f9ff;
-            padding: 20px;
-            border-radius: 10px;
-            margin-bottom: 15px;
-        }
-
-        .result-icon {
-            font-size: 4em;
-            text-align: center;
-            margin-bottom: 10px;
-        }
-
-        .result-title {
-            font-size: 2em;
-            text-align: center;
-            font-weight: bold;
-            margin-bottom: 20px;
-        }
-
-        .confidence-bar {
-            width: 100%;
-            height: 30px;
-            background: #e0e0e0;
-            border-radius: 15px;
-            overflow: hidden;
-            margin: 10px 0;
-        }
-
-        .confidence-fill {
-            height: 100%;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            transition: width 0.5s ease;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-weight: bold;
-        }
-
-        .detail-row {
-            display: flex;
-            justify-content: space-between;
-            padding: 10px 0;
-            border-bottom: 1px solid #e0e0e0;
-        }
-
-        .detail-label {
-            font-weight: bold;
-            color: #666;
-        }
-
-        .detail-value {
-            color: #333;
-        }
-
-        .explanation {
-            background: white;
-            padding: 15px;
-            border-radius: 10px;
-            margin-top: 15px;
-            border-left: 4px solid #667eea;
-        }
-
-        .audio-player {
-            width: 100%;
-            margin-top: 15px;
-        }
-
-        .reset-btn {
-            width: 100%;
-            background: #6c757d;
-            color: white;
-            padding: 12px;
-            border: none;
-            border-radius: 10px;
-            margin-top: 15px;
-            cursor: pointer;
-        }
-
-        .reset-btn:hover {
-            background: #5a6268;
-        }
-
-        .loading-section {
-            text-align: center;
-            padding: 40px;
-        }
-
-        .spinner {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #667eea;
-            border-radius: 50%;
-            width: 60px;
-            height: 60px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 20px;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        .error-section {
-            background: #fff3cd;
-            border: 2px solid #ffc107;
-            border-radius: 10px;
-            padding: 20px;
-            margin-top: 20px;
-        }
-
-        .error-icon {
-            font-size: 3em;
-            text-align: center;
-            margin-bottom: 10px;
-        }
-
-        .error-message {
-            color: #856404;
-            text-align: center;
-        }
-
-        .hidden {
-            display: none;
-        }
-
-        .file-name {
-            margin-top: 15px;
-            color: #666;
-            font-size: 0.9em;
-        }
-
-        .footer {
-            text-align: center;
-            margin-top: 30px;
-            color: white;
-            font-size: 0.9em;
-        }
+    <style media="screen">
+      body { background: #ECEFF1; color: rgba(0,0,0,0.87); font-family: Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 0; }
+      #message { background: white; max-width: 360px; margin: 100px auto 16px; padding: 32px 24px; border-radius: 3px; }
+      #message h2 { color: #ffa100; font-weight: bold; font-size: 16px; margin: 0 0 8px; }
+      #message h1 { font-size: 22px; font-weight: 300; color: rgba(0,0,0,0.6); margin: 0 0 16px;}
+      #message p { line-height: 140%; margin: 16px 0 24px; font-size: 14px; }
+      #message a { display: block; text-align: center; background: #039be5; text-transform: uppercase; text-decoration: none; color: white; padding: 16px; border-radius: 4px; }
+      #message, #message a { box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24); }
+      #load { color: rgba(0,0,0,0.4); text-align: center; font-size: 13px; }
+      @media (max-width: 600px) {
+        body, #message { margin-top: 0; background: white; box-shadow: none; }
+        body { border-top: 16px solid #ffa100; }
+      }
     </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <div class="icon">🎤</div>
-            <h1>AI Voice Detection</h1>
-            <p>Detect AI-generated vs Human voices in multiple languages</p>
-        </div>
-
-        <!-- Upload Section -->
-        <div id="uploadSection">
-            <div class="upload-section">
-                <input type="file" id="audioFile" class="file-input" accept="audio/*">
-                <label for="audioFile" class="upload-btn">Choose Audio File</label>
-                <div id="fileName" class="file-name"></div>
-            </div>
-
-            <select id="language" class="language-select">
-                <option value="english">English</option>
-                <option value="tamil">Tamil</option>
-                <option value="hindi">Hindi</option>
-                <option value="malayalam">Malayalam</option>
-                <option value="telugu">Telugu</option>
-            </select>
-
-            <button id="analyzeBtn" class="analyze-btn" disabled>Analyze Audio</button>
-        </div>
-
-        <!-- Loading Section -->
-        <div id="loadingSection" class="loading-section hidden">
-            <div class="spinner"></div>
-            <h2>Analyzing audio...</h2>
-            <p>This may take a few seconds</p>
-        </div>
-
-        <!-- Results Section -->
-        <div id="resultsSection" class="results-section hidden">
-            <div class="result-card">
-                <div id="resultIcon" class="result-icon">👤</div>
-                <h2 id="resultTitle" class="result-title">Human Voice</h2>
-                
-                <h3>Confidence Score</h3>
-                <div class="confidence-bar">
-                    <div id="confidenceFill" class="confidence-fill" style="width: 0%">
-                        <span id="confidenceScore">0%</span>
-                    </div>
-                </div>
-
-                <div class="detail-row">
-                    <span class="detail-label">Language:</span>
-                    <span id="resultLanguage" class="detail-value">English</span>
-                </div>
-
-                <div class="detail-row">
-                    <span class="detail-label">Classification:</span>
-                    <span id="resultClassification" class="detail-value">HUMAN</span>
-                </div>
-
-                <div class="explanation">
-                    <strong>Explanation:</strong>
-                    <p id="resultExplanation"></p>
-                </div>
-
-                <audio id="audioPlayer" class="audio-player" controls></audio>
-
-                <button class="reset-btn" onclick="resetAnalysis()">Analyze Another</button>
-            </div>
-        </div>
-
-        <!-- Error Section -->
-        <div id="errorSection" class="error-section hidden">
-            <div class="error-icon">⚠️</div>
-            <h2 style="color: #856404; text-align: center;">Error</h2>
-            <p id="errorMessage" class="error-message"></p>
-            <button class="reset-btn" onclick="resetAnalysis()">Try Again</button>
-        </div>
+  </head>
+  <body>
+    <div id="message">
+      <h2>Welcome</h2>
+      <h1>Firebase Hosting Setup Complete</h1>
+      <p>You're seeing this because you've successfully setup Firebase Hosting. Now it's time to go build something extraordinary!</p>
+      <a target="_blank" href="https://firebase.google.com/docs/hosting/">Open Hosting Documentation</a>
     </div>
+    <p id="load">Firebase SDK Loading&hellip;</p>
 
-    <div class="footer">
-        Built with FastAPI + PyTorch | Supports Tamil, English, Hindi, Malayalam, Telugu
-    </div>
+    <script>
+      document.addEventListener('DOMContentLoaded', function() {
+        const loadEl = document.querySelector('#load');
+        // // 🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥
+        // // The Firebase SDK is initialized and available here!
+        //
+        // firebase.auth().onAuthStateChanged(user => { });
+        // firebase.database().ref('/path/to/ref').on('value', snapshot => { });
+        // firebase.firestore().doc('/foo/bar').get().then(() => { });
+        // firebase.functions().httpsCallable('yourFunction')().then(() => { });
+        // firebase.messaging().requestPermission().then(() => { });
+        // firebase.storage().ref('/path/to/ref').getDownloadURL().then(() => { });
+        // firebase.analytics(); // call to activate
+        // firebase.analytics().logEvent('tutorial_completed');
+        // firebase.performance(); // call to activate
+        //
+        // // 🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥
 
-    <script src="/static/script.js"></script>
-</body>
+        try {
+          let app = firebase.app();
+          let features = [
+            'auth', 
+            'database', 
+            'firestore',
+            'functions',
+            'messaging', 
+            'storage', 
+            'analytics', 
+            'remoteConfig',
+            'performance',
+          ].filter(feature => typeof app[feature] === 'function');
+          loadEl.textContent = `Firebase SDK loaded with ${features.join(', ')}`;
+        } catch (e) {
+          console.error(e);
+          loadEl.textContent = 'Error loading the Firebase SDK, check the console.';
+        }
+      });
+    </script>
+  </body>
 </html>
