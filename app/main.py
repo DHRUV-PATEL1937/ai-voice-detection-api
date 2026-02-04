@@ -106,7 +106,7 @@ async def health_check():
         "detector_ready": detector is not None
     }
 
-# ✅ NEW: Handle GET requests to prevent 405 errors and "loops"
+# ✅ Handle GET requests to prevent 405 errors
 @app.get("/api/voice-detection")
 async def get_voice_detection_info():
     return {
@@ -114,8 +114,11 @@ async def get_voice_detection_info():
         "message": "This endpoint expects a POST request with audio data. Use the frontend to upload a file."
     }
 
+# ✅ CRITICAL FIX: Changed 'async def' to 'def'
+# This runs the heavy AI processing in a separate thread pool,
+# preventing the server from freezing/locking up during analysis.
 @app.post("/api/voice-detection", response_model=VoiceDetectionResponse)
-async def detect_voice(request: VoiceDetectionRequest):
+def detect_voice(request: VoiceDetectionRequest):
     """Detect if voice is AI-generated or human"""
     
     logger.info(f"📥 Request received - Language: {request.language}, User: {request.userId}")
